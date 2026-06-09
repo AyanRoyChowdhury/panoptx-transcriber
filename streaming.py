@@ -122,10 +122,10 @@ class ParakeetStreamer:
         )
 
         # Streaming state
-        self._win:           np.ndarray = np.empty(0, np.float32)
-        self._committed_len: int        = 0
-        self._committed_txt: str        = ""
-        self._commit_margin_s: float    = DEFAULT_COMMIT_MARGIN_S
+        self._win:                np.ndarray = np.empty(0, np.float32)
+        self._committed_enc_frame: int       = -1  # window-relative enc frame of last committed token
+        self._committed_txt:      str        = ""
+        self._commit_margin_s:    float      = DEFAULT_COMMIT_MARGIN_S
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -136,10 +136,11 @@ class ParakeetStreamer:
     def add_audio(self, samples: np.ndarray) -> None:
         self._win = np.concatenate([self._win, samples])
         if len(self._win) > MAX_WIN:
-            # Trim front, but keep committed_samples alignment correct.
-            # We track how many samples to drop.
             excess = len(self._win) - MAX_WIN
             self._win = self._win[excess:]
+            # Shift the committed-frame pointer left to account for removed audio.
+            # 1 encoder frame = STRIDE samples, so trim by the same number of frames.
+            self._committed_enc_frame = max(-1, self._committed_enc_frame - excess // STRIDE)
 
     def infer(self) -> tuple[str, str]:
         """
@@ -172,14 +173,14 @@ class ParakeetStreamer:
 
         full_text = _toks_to_text(self._vocab, tokens)
         delta = full_text[len(self._committed_txt):]
-        self._committed_txt = full_text
-        self._committed_len = len(tokens)
+        self._committed_txt       = full_text
+        self._committed_enc_frame = enc_out.shape[0] - 1
         return delta, ""
 
     def reset(self) -> None:
-        self._win           = np.empty(0, np.float32)
-        self._committed_len = 0
-        self._committed_txt = ""
+        self._win                 = np.empty(0, np.float32)
+        self._committed_enc_frame = -1
+        self._committed_txt       = ""
 
     # ── feature extraction ────────────────────────────────────────────────────
 
@@ -285,44 +286,52 @@ class ParakeetStreamer:
         """
         Commit tokens that are safely before the right-context margin.
 
+        Uses encoder-frame position as the watermark (not token count) so that
+        trimming the rolling audio buffer never causes the watermark to exceed
+        the number of tokens the trimmed window can produce.
+
         A token at encoder frame F is committed when:
           F < total_enc_frames - COMMIT_MARGIN_ENC
+          F > _committed_enc_frame  (not already committed)
 
-        This guarantees the encoder had at least COMMIT_MARGIN_ENC frames of
-        right-context when it made the prediction, so the token is stable.
-
-        Commits only advance to the last COMPLETE WORD boundary to avoid
-        emitting subword fragments (e.g., "o" + "ver" instead of "over").
+        Commits only advance to the last COMPLETE WORD boundary.
         """
         commit_margin_enc = int(self._commit_margin_s / STRIDE_S)
-        commit_boundary = total_enc_frames - commit_margin_enc
+        commit_boundary   = total_enc_frames - commit_margin_enc
 
-        # Find the furthest token index that is within the safe commit region
-        # and is at a word boundary (next token starts with ' ').
-        safe_end = self._committed_len   # nothing new yet
-        for i in range(self._committed_len, len(curr_tokens)):
+        safe_end         = 0
+        last_safe_frame  = self._committed_enc_frame
+
+        for i in range(len(curr_tokens)):
             if curr_frames[i] >= commit_boundary:
-                break  # beyond safe region
-            # Check word boundary: the NEXT token starts a new word (▁ prefix → ' ')
+                break                               # too close to right edge
+            if curr_frames[i] <= self._committed_enc_frame:
+                continue                            # already committed in a prior pass
             next_i = i + 1
             at_boundary = (
                 next_i >= len(curr_tokens)
                 or self._vocab.get(curr_tokens[next_i], "").startswith(" ")
             )
             if at_boundary:
-                safe_end = next_i
+                safe_end        = next_i
+                last_safe_frame = curr_frames[i]
 
-        # Commit the new safe prefix
-        if safe_end > self._committed_len:
+        if safe_end > 0:
             full_committed = _toks_to_text(self._vocab, curr_tokens[:safe_end])
-            delta = full_committed[len(self._committed_txt):]
-            self._committed_txt = full_committed
-            self._committed_len = safe_end
+            if len(full_committed) > len(self._committed_txt):
+                delta = full_committed[len(self._committed_txt):]
+                self._committed_txt = full_committed
+            else:
+                delta = ""
+            self._committed_enc_frame = last_safe_frame
         else:
             delta = ""
 
-        # Partial: everything after committed frontier
-        partial_toks = curr_tokens[self._committed_len:]
+        # Partial: tokens whose encoder frame is past the committed frontier
+        partial_toks = [
+            t for t, f in zip(curr_tokens, curr_frames)
+            if f > self._committed_enc_frame
+        ]
         partial = _toks_to_text(self._vocab, partial_toks) if partial_toks else ""
 
         return delta, partial
