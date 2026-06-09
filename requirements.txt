@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+onnx-asr[cpu,hub]
+numpy
+yt-dlp
+noisereduce
+scipy
+sherpa-onnx

@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PanOptX Transcriber (Demo)</title>
+  <style>
+    :root {
+      --teal:        #00d4c8;
+      --teal-dim:    #00a89f;
+      --teal-deep:   #005f5a;
+      --coral:       #ff6b5b;
+      --coral-dim:   #e85545;
+      --bg-deep:     #061a1e;
+      --glass:       rgba(0, 212, 200, 0.06);
+      --glass-hover: rgba(0, 212, 200, 0.12);
+      --glass-border: rgba(0, 212, 200, 0.22);
+      --glass-border-strong: rgba(0, 212, 200, 0.45);
+      --text:        #e8f8f8;
+      --text-dim:    rgba(232,248,248,0.5);
+      --text-faint:  rgba(232,248,248,0.28);
+      --green:       #00e5b0;
+      --yellow:      #ffcc44;
+      --purple:      #be94ff;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg-deep);
+      background-image:
+        radial-gradient(ellipse 80% 60% at 15% 20%,  rgba(0,212,200,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 85% 75%,  rgba(255,107,91,0.10) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 40% at 50% 50%,  rgba(0,168,159,0.07) 0%, transparent 70%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 2.5rem 1rem 5rem;
+    }
+
+    /* ── Header ── */
+    header { text-align: center; margin-bottom: 2.5rem; }
+    header h1 {
+      font-size: 2rem; font-weight: 800; letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--teal) 0%, #80f5f0 45%, var(--coral) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    header .demo-tag {
+      display: inline-block; margin-top: 0.5rem;
+      font-size: 0.68rem; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--teal-dim); border: 1px solid rgba(0,212,200,0.3); border-radius: 99px;
+      padding: 0.15rem 0.75rem;
+    }
+    header p { color: var(--text-dim); font-size: 0.82rem; margin-top: 0.5rem; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--glass);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 1.4rem 1.6rem;
+      width: 100%; max-width: 780px;
+      margin-bottom: 1.1rem;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+
+    .label {
+      font-size: 0.67rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.12em; color: var(--teal-dim); margin-bottom: 0.75rem;
+    }
+
+    .row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+
+    /* ── Source buttons ── */
+    .src-btn {
+      padding: 0.45rem 1rem; border-radius: 8px;
+      border: 1px solid var(--glass-border);
+      background: rgba(0,212,200,0.04); color: var(--text-dim);
+      cursor: pointer; font-size: 0.84rem;
+      transition: all 0.18s ease;
+    }
+    .src-btn:hover:not(.active):not(:disabled) {
+      border-color: rgba(0,212,200,0.4); color: var(--text); background: rgba(0,212,200,0.08);
+    }
+    .src-btn.active {
+      border-color: var(--teal); color: var(--teal); background: rgba(0,212,200,0.12);
+      box-shadow: 0 0 14px rgba(0,212,200,0.2), inset 0 1px 0 rgba(0,212,200,0.15);
+    }
+    .src-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* ── Action buttons ── */
+    .btn {
+      padding: 0.45rem 1.3rem; border-radius: 8px; border: none;
+      font-size: 0.85rem; font-weight: 700; cursor: pointer;
+      transition: all 0.18s ease; letter-spacing: 0.02em;
+    }
+    .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn-start {
+      background: linear-gradient(135deg, var(--teal), var(--teal-dim));
+      color: var(--bg-deep); box-shadow: 0 0 18px rgba(0,212,200,0.35);
+    }
+    .btn-start:hover:not(:disabled) { box-shadow: 0 0 28px rgba(0,212,200,0.55); transform: translateY(-1px); }
+    .btn-stop {
+      background: linear-gradient(135deg, var(--coral), var(--coral-dim));
+      color: #fff; box-shadow: 0 0 18px rgba(255,107,91,0.35);
+    }
+    .btn-stop:hover:not(:disabled) { box-shadow: 0 0 28px rgba(255,107,91,0.55); transform: translateY(-1px); }
+    .btn-clear { background: transparent; border: 1px solid var(--glass-border); color: var(--text-dim); }
+    .btn-clear:hover { border-color: rgba(0,212,200,0.4); color: var(--text); }
+    .btn-icon {
+      background: transparent; border: 1px solid var(--glass-border);
+      color: var(--text-dim); padding: 0.4rem 0.6rem; border-radius: 8px;
+      font-size: 0.95rem; cursor: pointer; transition: all 0.18s;
+    }
+    .btn-icon:hover { border-color: rgba(0,212,200,0.4); color: var(--teal); }
+    .btn-icon.active { border-color: var(--teal); color: var(--teal); background: rgba(0,212,200,0.1); }
+
+    /* ── Status ── */
+    .status {
+      font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em;
+      padding: 0.22rem 0.75rem; border-radius: 99px; margin-left: auto;
+      text-transform: uppercase;
+    }
+    .status.idle       { background: rgba(232,248,248,0.06);  color: var(--text-faint); border: 1px solid rgba(232,248,248,0.1); }
+    .status.connecting { background: rgba(0,212,200,0.12);    color: var(--teal);        border: 1px solid rgba(0,212,200,0.3); }
+    .status.recording  {
+      background: rgba(0,229,176,0.12); color: var(--green);
+      border: 1px solid rgba(0,229,176,0.35);
+      animation: glow-pulse 2s ease-in-out infinite;
+    }
+    .status.error { background: rgba(255,107,91,0.15); color: var(--coral); border: 1px solid rgba(255,107,91,0.3); }
+
+    @keyframes glow-pulse {
+      0%, 100% { box-shadow: 0 0 8px rgba(0,229,176,0.2); }
+      50%       { box-shadow: 0 0 18px rgba(0,229,176,0.45); }
+    }
+
+    /* ── Volume bar ── */
+    .vol-wrap { width: 100%; height: 2px; background: rgba(0,212,200,0.1); border-radius: 2px; margin-top: 1rem; overflow: hidden; }
+    #volFill  { height: 100%; width: 0%; border-radius: 2px; transition: width 0.05s linear;
+                background: linear-gradient(90deg, var(--teal), var(--coral)); }
+
+    /* ── YouTube row ── */
+    #ytRow { display: none; margin-top: 0.9rem; }
+    #ytRow.visible { display: flex; gap: 0; }
+    #ytInput {
+      flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border);
+      border-right: none; border-radius: 8px 0 0 8px;
+      color: var(--text); font-size: 0.85rem; padding: 0.5rem 0.85rem; outline: none;
+      transition: border-color 0.15s;
+    }
+    #ytInput:focus { border-color: var(--teal); }
+    #ytInput::placeholder { color: var(--text-faint); }
+    #ytInput + .btn { border-radius: 0 8px 8px 0; }
+
+    /* ── File upload ── */
+    #fileRow { display: none; margin-top: 0.9rem; flex-direction: column; gap: 0.85rem; }
+    #fileRow.visible { display: flex; }
+    .drop-zone {
+      border: 1.5px dashed var(--glass-border); border-radius: 10px; padding: 1.75rem;
+      text-align: center; cursor: pointer; color: var(--text-dim); font-size: 0.85rem;
+      background: rgba(0,212,200,0.02); transition: all 0.18s ease;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--teal); background: rgba(0,212,200,0.06);
+      box-shadow: inset 0 0 24px rgba(0,212,200,0.05);
+    }
+    .drop-zone input[type="file"] { display: none; }
+    .drop-zone .drop-icon { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
+    .drop-zone .drop-sub  { font-size: 0.72rem; color: var(--text-faint); margin-top: 0.25rem; }
+    #filePlayerWrap { display: none; flex-direction: column; gap: 0.5rem; }
+    #filePlayerWrap.visible { display: flex; }
+    #fileNameLabel { font-size: 0.78rem; color: var(--teal-dim); }
+    audio#audioPlayer { width: 100%; height: 36px; border-radius: 8px; cursor: pointer; }
+
+    /* ── Notices ── */
+    .notice {
+      display: none; margin-top: 0.7rem; padding: 0.55rem 0.85rem;
+      border-radius: 8px; font-size: 0.8rem; line-height: 1.5;
+      border: 1px solid rgba(255,204,68,0.3);
+      background: rgba(255,204,68,0.06); color: var(--yellow);
+    }
+    .notice.visible { display: block; }
+    .notice.info { border-color: rgba(0,212,200,0.25); background: rgba(0,212,200,0.05); color: var(--teal); }
+
+    /* ── Config panel ── */
+    #configPanel {
+      display: none; margin-top: 1rem;
+      padding-top: 1rem; border-top: 1px solid var(--glass-border);
+    }
+    #configPanel.visible { display: block; }
+
+    .config-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem;
+    }
+    @media (max-width: 520px) { .config-grid { grid-template-columns: 1fr; } }
+
+    .config-row { display: flex; flex-direction: column; gap: 0.35rem; }
+    .config-row label { font-size: 0.78rem; color: var(--text-dim); display: flex; justify-content: space-between; }
+    .config-row label span { color: var(--teal); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .config-row .range-wrap { position: relative; }
+
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+      background: linear-gradient(
+        to right,
+        var(--teal) 0%,
+        var(--teal) var(--fill, 0%),
+        rgba(0,212,200,0.15) var(--fill, 0%),
+        rgba(0,212,200,0.15) 100%
+      );
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--teal); border: 2px solid var(--bg-deep);
+      box-shadow: 0 0 8px rgba(0,212,200,0.5); cursor: pointer;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--teal); border: 2px solid var(--bg-deep);
+      box-shadow: 0 0 8px rgba(0,212,200,0.5); cursor: pointer;
+    }
+
+    .preset-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.4rem; }
+    .preset-btn {
+      padding: 0.3rem 0.8rem; border-radius: 6px; border: 1px solid var(--glass-border);
+      background: rgba(0,212,200,0.04); color: var(--text-dim);
+      font-size: 0.78rem; cursor: pointer; transition: all 0.15s;
+    }
+    .preset-btn:hover { border-color: rgba(0,212,200,0.4); color: var(--text); }
+    .preset-btn.active { border-color: var(--coral); color: var(--coral); background: rgba(255,107,91,0.08); }
+
+    .config-ack {
+      font-size: 0.72rem; color: var(--green); height: 1em; margin-top: 0.5rem;
+      transition: opacity 0.4s;
+    }
+    .config-ack.fade { opacity: 0; }
+
+    /* ── Transcript ── */
+    #transcript {
+      background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border);
+      border-radius: 10px; padding: 1.1rem 1.25rem;
+      min-height: 280px; max-height: 520px;
+      overflow-y: auto; font-size: 1rem; line-height: 1.8;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    #transcript::-webkit-scrollbar { width: 4px; }
+    #transcript::-webkit-scrollbar-track { background: transparent; }
+    #transcript::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 2px; }
+    .placeholder  { color: var(--text-faint); font-style: italic; }
+    .final        { color: var(--text); }
+    .partial-live {
+      color: var(--teal-dim); font-style: italic;
+      border-bottom: 1px dashed rgba(0,212,200,0.35);
+    }
+
+    /* ── Latency grid ── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.8rem;
+    }
+    .stat-cell {
+      background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border);
+      border-radius: 10px; padding: 0.85rem 1rem; transition: border-color 0.2s;
+    }
+    .stat-cell:hover { border-color: var(--glass-border-strong); }
+    .stat-val {
+      font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums;
+      background: linear-gradient(135deg, var(--teal) 0%, #80f5f0 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .stat-val.good { background: linear-gradient(135deg, var(--green),  #00ffcc); -webkit-background-clip: text; background-clip: text; }
+    .stat-val.warn { background: linear-gradient(135deg, var(--yellow), #ffdd88); -webkit-background-clip: text; background-clip: text; }
+    .stat-val.bad  { background: linear-gradient(135deg, var(--coral),  #ff9988); -webkit-background-clip: text; background-clip: text; }
+    .stat-lbl { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); margin-top: 0.3rem; }
+    .stat-sub { font-size: 0.67rem; color: rgba(232,248,248,0.2); margin-top: 0.1rem; }
+
+    .hint { text-align: center; color: var(--text-faint); font-size: 0.78rem; margin-top: 0.6rem; }
+
+    /* ── Toggle switch ── */
+    .toggle-wrap { position: relative; display: inline-flex; cursor: pointer; }
+    .toggle-wrap input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      width: 34px; height: 18px; background: rgba(0,212,200,0.15);
+      border: 1px solid var(--glass-border); border-radius: 99px;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .toggle-thumb {
+      position: absolute; top: 3px; left: 3px;
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--text-faint); transition: transform 0.2s, background 0.2s;
+    }
+    .toggle-wrap input:checked + .toggle-track { background: rgba(0,212,200,0.25); border-color: var(--teal); }
+    .toggle-wrap input:checked + .toggle-track .toggle-thumb { transform: translateX(16px); background: var(--teal); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>PanOptX Transcriber</h1>
+    <span class="demo-tag">Demo</span>
+    <p style="display:flex;align-items:center;gap:0.6rem;justify-content:center;flex-wrap:wrap">
+      <span>ONNX &nbsp;·&nbsp; CPU-only &nbsp;·&nbsp; Model:</span>
+      <select id="modelSelect" style="
+        background:rgba(0,212,200,0.08);border:1px solid var(--glass-border-strong);
+        color:var(--teal);border-radius:6px;padding:0.2rem 0.5rem;font-size:0.85rem;
+        cursor:pointer;outline:none">
+        <option value="parakeet">Parakeet TDT 0.6B v3</option>
+        <option value="nemotron">Nemotron Streaming 0.6B (downloads ~1.3 GB)</option>
+      </select>
+    </p>
+  </header>
+
+  <!-- ── Source card ── -->
+  <div class="card">
+    <div class="label">Audio source</div>
+    <div class="row">
+      <button class="src-btn active" data-src="mic">🎙&nbsp; Microphone</button>
+      <button class="src-btn"        data-src="screen">🖥&nbsp; Screen / Tab</button>
+      <button class="src-btn"        data-src="youtube">▶️&nbsp; YouTube URL</button>
+      <button class="src-btn"        data-src="file">📂&nbsp; Audio File</button>
+    </div>
+
+    <!-- YouTube input -->
+    <div id="ytRow">
+      <input id="ytInput" type="url" placeholder="https://www.youtube.com/watch?v=…" />
+    </div>
+
+    <!-- File upload -->
+    <div id="fileRow">
+      <label class="drop-zone" id="dropZone">
+        <span class="drop-icon">🎵</span>
+        Drop an audio file here, or click to browse
+        <span class="drop-sub">MP3 · WAV · M4A · OGG · FLAC · any audio format</span>
+        <input type="file" id="fileInput" accept="audio/*" />
+      </label>
+      <div id="filePlayerWrap">
+        <div id="fileNameLabel"></div>
+        <audio id="audioPlayer" controls></audio>
+        <div class="notice info visible">
+          Press <strong>Play</strong> to start transcription. Pausing stops audio capture.
+        </div>
+      </div>
+    </div>
+
+    <!-- Safari screen warning -->
+    <div id="screenNotice" class="notice">
+      Safari does not support screen audio capture. Use <strong>YouTube URL</strong> instead,
+      or open this page in Chrome and choose "Chrome Tab → Share audio".
+    </div>
+
+    <!-- Controls row -->
+    <div class="row" style="margin-top:1rem">
+      <button id="startBtn" class="btn btn-start">Start</button>
+      <button id="stopBtn"  class="btn btn-stop"  style="display:none">Stop</button>
+      <button id="clearBtn" class="btn btn-clear">Clear</button>
+      <button id="cfgToggle" class="btn-icon" title="Config">⚙️</button>
+      <span   id="statusBadge" class="status idle">Idle</span>
+    </div>
+
+    <div class="vol-wrap"><div id="volFill"></div></div>
+
+    <!-- ── Config panel ── -->
+    <div id="configPanel">
+      <div class="label" style="margin-top:0.2rem">Transcription config</div>
+
+      <div class="preset-row" style="margin-bottom:0.9rem">
+        <span style="font-size:0.75rem;color:var(--text-dim);align-self:center">Presets:</span>
+        <button class="preset-btn" data-margin="0.6">⚡ Fast (0.6 s)</button>
+        <button class="preset-btn" data-margin="1.0">🌊 Responsive (1 s)</button>
+        <button class="preset-btn active" data-margin="1.2">⚖️ Balanced (1.2 s)</button>
+        <button class="preset-btn" data-margin="2.0">🎯 Accurate (2 s)</button>
+      </div>
+
+      <div class="config-grid">
+        <div class="config-row">
+          <label>Commit margin <span id="commitMarginVal">1.2 s</span></label>
+          <div class="range-wrap">
+            <input type="range" id="commitMarginSlider"
+                   min="0.4" max="3.0" step="0.1" value="1.2" />
+          </div>
+          <div style="font-size:0.7rem;color:var(--text-faint);margin-top:0.2rem">
+            Right-context the model must see before committing a word.
+            Lower = faster but may produce fragments. Higher = more accurate.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Noise reduction ── -->
+      <div style="margin-top:1rem;padding-top:0.9rem;border-top:1px solid var(--glass-border)">
+        <div class="label" style="margin-bottom:0.6rem">Noise reduction</div>
+
+        <div class="config-grid">
+          <div class="config-row">
+            <label style="justify-content:space-between">
+              Bandpass filter
+              <label class="toggle-wrap">
+                <input type="checkbox" id="bpToggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </label>
+            <div class="config-row" id="bpControls" style="display:none;gap:0.3rem;margin-top:0.3rem">
+              <label>Low cut <span id="bpLoVal">100 Hz</span></label>
+              <input type="range" id="bpLoSlider" min="20" max="500" step="10" value="100" />
+              <label style="margin-top:0.3rem">High cut <span id="bpHiVal">3800 Hz</span></label>
+              <input type="range" id="bpHiSlider" min="1000" max="7900" step="100" value="3800" />
+            </div>
+            <div style="font-size:0.7rem;color:var(--text-faint);margin-top:0.2rem">
+              Keeps 100–3800 Hz (speech band). Removes crowd rumble below and hiss above.
+            </div>
+          </div>
+
+          <div class="config-row">
+            <label style="justify-content:space-between">
+              Noise suppress (NR)
+              <label class="toggle-wrap">
+                <input type="checkbox" id="nrToggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </label>
+            <div id="nrControls" style="display:none;gap:0.3rem;margin-top:0.3rem" class="config-row">
+              <label>Strength <span id="nrStrVal">75%</span></label>
+              <input type="range" id="nrSlider" min="0" max="100" step="5" value="75" />
+            </div>
+            <div style="font-size:0.7rem;color:var(--text-faint);margin-top:0.2rem">
+              Stationary NR — ideal for steady crowd noise. Adds ~50–150 ms per chunk.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-ack" id="configAck"></div>
+    </div>
+  </div>
+
+  <!-- ── Transcript card ── -->
+  <div class="card">
+    <div class="label">Live transcript</div>
+    <div id="transcript"><span class="placeholder">Waiting for audio…</span></div>
+  </div>
+
+  <!-- ── Latency card ── -->
+  <div class="card">
+    <div class="label">Latency &amp; performance</div>
+    <div class="stats-grid">
+      <div class="stat-cell">
+        <div class="stat-val" id="statInference">—</div>
+        <div class="stat-lbl">Inference</div>
+        <div class="stat-sub">last chunk (ms)</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-val" id="statAvgInf">—</div>
+        <div class="stat-lbl">Avg inference</div>
+        <div class="stat-sub">rolling 5 chunks</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-val" id="statRTT">—</div>
+        <div class="stat-lbl">Round-trip</div>
+        <div class="stat-sub">send → response (ms)</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-val" id="statRTF">—</div>
+        <div class="stat-lbl">RTF</div>
+        <div class="stat-sub">inference / chunk</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-val" id="statChunks">0</div>
+        <div class="stat-lbl">Chunks done</div>
+        <div class="stat-sub">total processed</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-val" id="statTotalLag">—</div>
+        <div class="stat-lbl">Est. total lag</div>
+        <div class="stat-sub">chunk + inference</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-val" id="statPreproc">—</div>
+        <div class="stat-lbl">Pre-processing</div>
+        <div class="stat-sub">bandpass + NR (ms)</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="hint">Transcript accumulates and never erases &nbsp;·&nbsp; commit margin controls latency vs accuracy</p>
+
+<script>
+  const PROTO    = location.protocol === "https:" ? "wss:" : "ws:";
+  const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+  const modelSelect = document.getElementById("modelSelect");
+  let selectedModel = modelSelect.value;
+  function wsUrl() { return `${PROTO}//${location.host}/ws?model=${selectedModel}`; }
+
+  let ws          = null;
+  let audioCtx    = null;
+  let processor   = null;
+  let mediaStream = null;
+  let audioSrc    = null;
+  let selectedSrc = "mic";
+
+  let fileAudioCtx  = null;
+  let fileProcessor = null;
+  let fileAudioSrc  = null;
+  let fileConnected = false;
+
+  const infWindow  = [];
+  let   chunkCount = 0;
+  let   lastSendTime = 0;
+
+  // Config state
+  let cfgCommitMargin = 1.2;
+  let cfgNrEnabled  = false;
+  let cfgNrStrength = 0.75;
+  let cfgBpEnabled  = false;
+  let cfgBpLo       = 100;
+  let cfgBpHi       = 3800;
+
+  // DOM refs
+  const startBtn       = document.getElementById("startBtn");
+  const stopBtn        = document.getElementById("stopBtn");
+  const clearBtn       = document.getElementById("clearBtn");
+  const cfgToggle      = document.getElementById("cfgToggle");
+  const statusBadge    = document.getElementById("statusBadge");
+  const transcriptEl   = document.getElementById("transcript");
+  const volFill        = document.getElementById("volFill");
+  const ytRow          = document.getElementById("ytRow");
+  const ytInput        = document.getElementById("ytInput");
+  const screenNotice   = document.getElementById("screenNotice");
+  const fileRow        = document.getElementById("fileRow");
+  const dropZone       = document.getElementById("dropZone");
+  const fileInput      = document.getElementById("fileInput");
+  const filePlayerWrap = document.getElementById("filePlayerWrap");
+  const fileNameLabel  = document.getElementById("fileNameLabel");
+  const audioPlayer    = document.getElementById("audioPlayer");
+  const configPanel    = document.getElementById("configPanel");
+  const commitMarginSlider = document.getElementById("commitMarginSlider");
+  const commitMarginVal    = document.getElementById("commitMarginVal");
+  const configAck      = document.getElementById("configAck");
+
+  const statInference  = document.getElementById("statInference");
+  const statAvgInf     = document.getElementById("statAvgInf");
+  const statRTT        = document.getElementById("statRTT");
+  const statRTF        = document.getElementById("statRTF");
+  const statChunks     = document.getElementById("statChunks");
+  const statTotalLag   = document.getElementById("statTotalLag");
+  const statPreproc    = document.getElementById("statPreproc");
+
+  // Noise reduction controls
+  const nrToggle    = document.getElementById("nrToggle");
+  const nrControls  = document.getElementById("nrControls");
+  const nrSlider    = document.getElementById("nrSlider");
+  const nrStrVal    = document.getElementById("nrStrVal");
+  const bpToggle    = document.getElementById("bpToggle");
+  const bpControls  = document.getElementById("bpControls");
+  const bpLoSlider  = document.getElementById("bpLoSlider");
+  const bpHiSlider  = document.getElementById("bpHiSlider");
+  const bpLoVal     = document.getElementById("bpLoVal");
+  const bpHiVal     = document.getElementById("bpHiVal");
+
+  /* ── Helpers: slider fill ── */
+  function updateSliderFill(el) {
+    const pct = ((el.value - el.min) / (el.max - el.min)) * 100;
+    el.style.setProperty("--fill", pct + "%");
+  }
+
+  commitMarginSlider.addEventListener("input", () => {
+    const v = parseFloat(commitMarginSlider.value);
+    commitMarginVal.textContent = v.toFixed(1) + " s";
+    cfgCommitMargin = v;
+    updateSliderFill(commitMarginSlider);
+    sendConfig();
+    highlightPreset();
+  });
+
+  updateSliderFill(commitMarginSlider);
+
+  /* ── Noise reduction controls ── */
+  bpToggle.addEventListener("change", () => {
+    cfgBpEnabled = bpToggle.checked;
+    bpControls.style.display = cfgBpEnabled ? "flex" : "none";
+    sendConfig();
+  });
+  bpLoSlider.addEventListener("input", () => {
+    cfgBpLo = parseInt(bpLoSlider.value);
+    bpLoVal.textContent = cfgBpLo + " Hz";
+    updateSliderFill(bpLoSlider);
+    sendConfig();
+  });
+  bpHiSlider.addEventListener("input", () => {
+    cfgBpHi = parseInt(bpHiSlider.value);
+    bpHiVal.textContent = cfgBpHi + " Hz";
+    updateSliderFill(bpHiSlider);
+    sendConfig();
+  });
+  updateSliderFill(bpLoSlider);
+  updateSliderFill(bpHiSlider);
+
+  nrToggle.addEventListener("change", () => {
+    cfgNrEnabled = nrToggle.checked;
+    nrControls.style.display = cfgNrEnabled ? "flex" : "none";
+    sendConfig();
+  });
+  nrSlider.addEventListener("input", () => {
+    cfgNrStrength = parseInt(nrSlider.value) / 100;
+    nrStrVal.textContent = parseInt(nrSlider.value) + "%";
+    updateSliderFill(nrSlider);
+    sendConfig();
+  });
+  updateSliderFill(nrSlider);
+
+  /* ── Config toggle ── */
+  cfgToggle.addEventListener("click", () => {
+    const open = configPanel.classList.toggle("visible");
+    cfgToggle.classList.toggle("active", open);
+  });
+
+  /* ── Preset buttons ── */
+  document.querySelectorAll(".preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const margin = parseFloat(btn.dataset.margin);
+      commitMarginSlider.value     = margin;
+      commitMarginVal.textContent  = margin.toFixed(1) + " s";
+      cfgCommitMargin = margin;
+      updateSliderFill(commitMarginSlider);
+      sendConfig();
+      highlightPreset();
+    });
+  });
+
+  function highlightPreset() {
+    document.querySelectorAll(".preset-btn").forEach(btn => {
+      btn.classList.toggle("active", parseFloat(btn.dataset.margin) === cfgCommitMargin);
+    });
+  }
+
+  let configDebounce = null;
+  function sendConfig() {
+    clearTimeout(configDebounce);
+    configDebounce = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type:        "config",
+          nr_enabled:    cfgNrEnabled,
+          nr_strength:   cfgNrStrength,
+          bp_enabled:    cfgBpEnabled,
+          bp_lo:         cfgBpLo,
+          bp_hi:         cfgBpHi,
+          commit_margin: cfgCommitMargin,
+        }));
+      }
+    }, 150);
+  }
+
+  /* ── Source selector ── */
+  document.querySelectorAll(".src-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".src-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      selectedSrc = btn.dataset.src;
+      ytRow.classList.toggle("visible", selectedSrc === "youtube");
+      fileRow.classList.toggle("visible", selectedSrc === "file");
+      screenNotice.classList.toggle("visible", selectedSrc === "screen" && IS_SAFARI);
+      startBtn.style.display = selectedSrc === "file" ? "none" : "";
+      stopBtn.style.display  = "none";
+    });
+  });
+
+  /* ── File drag-and-drop ── */
+  dropZone.addEventListener("dragover",  e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+  dropZone.addEventListener("dragleave", ()  => dropZone.classList.remove("drag-over"));
+  dropZone.addEventListener("drop", e => {
+    e.preventDefault(); dropZone.classList.remove("drag-over");
+    const file = e.dataTransfer.files[0]; if (file) loadAudioFile(file);
+  });
+  fileInput.addEventListener("change", () => { if (fileInput.files[0]) loadAudioFile(fileInput.files[0]); });
+
+  function loadAudioFile(file) {
+    // Tear down any previous Web Audio context so createMediaElementSource
+    // can be called fresh on the new src (it can only be called once per element per context).
+    if (fileAudioCtx) {
+      try { fileProcessor && fileProcessor.disconnect(); } catch(_) {}
+      try { fileAudioSrc  && fileAudioSrc.disconnect();  } catch(_) {}
+      fileAudioCtx.close();
+    }
+    fileAudioCtx = null; fileAudioSrc = null; fileProcessor = null; fileConnected = false;
+
+    audioPlayer.src = URL.createObjectURL(file);
+    fileNameLabel.textContent = file.name;
+    filePlayerWrap.classList.add("visible");
+    dropZone.style.display = "none";
+  }
+
+  audioPlayer.addEventListener("play",  () => {
+    // currentTime near 0 means a fresh play or replay from start, not a resume from pause
+    if (audioPlayer.currentTime < 0.5) {
+      clearTranscript();
+      infWindow.length = 0; chunkCount = 0; lastSendTime = 0;
+      [statInference, statAvgInf, statRTT, statRTF, statTotalLag, statPreproc].forEach(el => {
+        el.textContent = "—"; el.className = "stat-val";
+      });
+      statChunks.textContent = "0"; statChunks.className = "stat-val";
+      // Tell server to reset streamer state for a clean replay
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reset" }));
+    }
+    connectFileCapture();
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      openWebSocket(() => { sendConfig(); setStatus("recording", "● Playing"); });
+    } else {
+      setStatus("recording", "● Playing");
+    }
+  });
+  audioPlayer.addEventListener("pause", () => setStatus("idle", "Paused"));
+  audioPlayer.addEventListener("ended", () => {
+    setStatus("idle", "File done");
+    disconnectFileCapture();
+    // Flush remaining buffered audio and clear partial
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "stop" }));
+    }
+    setTimeout(() => setPartial(""), 2000);
+  });
+
+  function connectFileCapture() {
+    if (fileConnected) return;
+    if (!fileAudioCtx) fileAudioCtx = new AudioContext();
+    if (fileAudioCtx.state === "suspended") fileAudioCtx.resume();
+    const nativeRate = fileAudioCtx.sampleRate;
+
+    // createMediaElementSource may only be called once per element per AudioContext.
+    // On replay we reuse the existing source node; only the processor is recreated.
+    if (!fileAudioSrc) {
+      fileAudioSrc = fileAudioCtx.createMediaElementSource(audioPlayer);
+      // Keep this connection permanent so playback is audible.
+      fileAudioSrc.connect(fileAudioCtx.destination);
+    }
+
+    fileProcessor = fileAudioCtx.createScriptProcessor(4096, 1, 1);
+    let accumBuf = new Float32Array(0);
+    fileProcessor.onaudioprocess = (e) => {
+      if (audioPlayer.paused) return;
+      const input     = e.inputBuffer.getChannelData(0);
+      const resampled = downsampleTo16k(input, nativeRate);
+      let rms = 0;
+      for (let i = 0; i < input.length; i++) rms += input[i] * input[i];
+      volFill.style.width = Math.min(Math.sqrt(rms / input.length) * 500, 100) + "%";
+      const merged = new Float32Array(accumBuf.length + resampled.length);
+      merged.set(accumBuf); merged.set(resampled, accumBuf.length);
+      accumBuf = merged;
+      while (accumBuf.length >= 1280) {
+        const chunk = accumBuf.slice(0, 1280);
+        accumBuf = accumBuf.slice(1280);
+        if (ws && ws.readyState === WebSocket.OPEN) { lastSendTime = Date.now(); ws.send(chunk.buffer); }
+      }
+    };
+    fileAudioSrc.connect(fileProcessor);
+    fileProcessor.connect(fileAudioCtx.destination);
+    fileConnected = true;
+  }
+
+  function disconnectFileCapture() {
+    if (!fileConnected) return;
+    if (fileProcessor) {
+      // Disconnect only the processor; leave fileAudioSrc → destination so audio stays audible.
+      try { fileAudioSrc.disconnect(fileProcessor); } catch(_) {}
+      fileProcessor.disconnect();
+      fileProcessor = null;
+    }
+    fileConnected = false;
+    volFill.style.width = "0%";
+  }
+
+  /* ── Status ── */
+  function setStatus(cls, label) { statusBadge.className = `status ${cls}`; statusBadge.textContent = label; }
+
+  /* ── Transcript ── */
+  // Committed text is appended permanently.
+  // Partial text lives in a single trailing span that gets replaced each pass.
+  function appendCommitted(text) {
+    if (!text) return;
+    const ph = transcriptEl.querySelector(".placeholder"); if (ph) ph.remove();
+    // Remove existing partial span before inserting committed text
+    const existing = transcriptEl.querySelector(".partial-live");
+    if (existing) existing.remove();
+    const span = document.createElement("span");
+    span.className = "final"; span.textContent = text;
+    transcriptEl.appendChild(span);
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+  function setPartial(text) {
+    let el = transcriptEl.querySelector(".partial-live");
+    if (!text) { if (el) el.remove(); return; }
+    const ph = transcriptEl.querySelector(".placeholder"); if (ph) ph.remove();
+    if (!el) {
+      el = document.createElement("span");
+      el.className = "partial-live";
+      transcriptEl.appendChild(el);
+    }
+    el.textContent = " " + text;
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+  // Legacy append (kept for compatibility)
+  function appendTranscript(text) { appendCommitted(text + " "); }
+  function clearTranscript() {
+    transcriptEl.innerHTML = `<span class="placeholder">Waiting for audio…</span>`;
+  }
+
+  /* ── Resampler ── */
+  function downsampleTo16k(buffer, fromRate) {
+    if (fromRate === 16000) return buffer;
+    const ratio = fromRate / 16000, outLen = Math.floor(buffer.length / ratio);
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const s = Math.floor(i * ratio), e = Math.floor((i + 1) * ratio);
+      let sum = 0; for (let j = s; j < e && j < buffer.length; j++) sum += buffer[j];
+      out[i] = sum / (e - s);
+    }
+    return out;
+  }
+
+  /* ── Stats ── */
+  function colorClass(v, g, w) { return v < g ? "good" : v < w ? "warn" : "bad"; }
+
+  function updateStats(msg) {
+    const infMs = msg.inference_ms;
+    infWindow.push(infMs); if (infWindow.length > 5) infWindow.shift();
+    chunkCount++;
+    const avgInf   = Math.round(infWindow.reduce((a,b)=>a+b,0) / infWindow.length);
+    const chunkMs  = 80;   // fixed 80 ms stride
+    const rtf      = (infMs / chunkMs).toFixed(2);
+    const totalLag = infMs + cfgCommitMargin * 1000;
+
+    statInference.textContent = infMs + " ms";
+    statInference.className   = "stat-val " + colorClass(infMs, 200, 500);
+    statAvgInf.textContent    = avgInf + " ms";
+    statAvgInf.className      = "stat-val " + colorClass(avgInf, 200, 500);
+    statRTF.textContent       = rtf;
+    statRTF.className         = "stat-val " + colorClass(parseFloat(rtf), 1.0, 3.0);
+    statChunks.textContent    = chunkCount;
+    statChunks.className      = "stat-val";
+    statTotalLag.textContent  = (totalLag / 1000).toFixed(1) + " s";
+    statTotalLag.className    = "stat-val " + colorClass(totalLag, 1000, 2000);
+    if (lastSendTime > 0) {
+      const rtt = Date.now() - lastSendTime;
+      statRTT.textContent = rtt + " ms";
+      statRTT.className   = "stat-val " + colorClass(rtt, 2000, 4000);
+    }
+    if (msg.preproc_ms != null && msg.preproc_ms > 0) {
+      statPreproc.textContent = msg.preproc_ms + " ms";
+      statPreproc.className   = "stat-val " + colorClass(msg.preproc_ms, 100, 300);
+    } else {
+      statPreproc.textContent = "off";
+      statPreproc.className   = "stat-val";
+    }
+  }
+
+  /* ── Model selector ── */
+  modelSelect.addEventListener("change", () => {
+    selectedModel = modelSelect.value;
+    // Close current connection so next Start uses the new model
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+      stopBrowserCapture();
+      resetUI();
+    }
+    clearTranscript();
+    setStatus("idle", "Model switched — press Start to connect");
+  });
+
+  /* ── WebSocket ── */
+  let ackFadeTimer = null;
+  function openWebSocket(onOpenCb) {
+    ws = new WebSocket(wsUrl());
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { clearTranscript(); if (onOpenCb) onOpenCb(); };
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "stream") {
+          if (msg.committed) appendCommitted(msg.committed);
+          setPartial(msg.partial || "");
+          if (msg.inference_ms != null) updateStats(msg);
+        }
+        if (msg.type === "append") { appendTranscript(msg.text); if (msg.inference_ms != null) updateStats(msg); }
+        if (msg.type === "error")  setStatus("error", msg.message.slice(0, 60));
+        if (msg.type === "config_ack") {
+          configAck.textContent = `✓ NR=${msg.nr_enabled ? "on" : "off"}  BP=${msg.bp_enabled ? "on" : "off"}`;
+          configAck.style.opacity = "1";
+          clearTimeout(ackFadeTimer);
+          ackFadeTimer = setTimeout(() => configAck.classList.add("fade"), 2500);
+          configAck.classList.remove("fade");
+        }
+      } catch (_) {}
+    };
+    ws.onerror = () => { stopBrowserCapture(); resetUI(); setStatus("error", "Connection error"); };
+    ws.onclose = () => { stopBrowserCapture(); resetUI(); };
+  }
+
+  /* ── Browser capture ── */
+  async function startBrowserCapture() {
+    if (selectedSrc === "mic") {
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+      });
+    } else {
+      mediaStream = await navigator.mediaDevices.getDisplayMedia({
+        audio: true, video: { width: 320, height: 240, frameRate: 1 }, preferCurrentTab: true,
+      });
+      if (!mediaStream.getAudioTracks().length) {
+        mediaStream.getTracks().forEach(t => t.stop()); throw new Error("NoAudio");
+      }
+    }
+    audioCtx = new AudioContext(); await audioCtx.resume();
+    const nativeRate = audioCtx.sampleRate;
+    audioSrc  = audioCtx.createMediaStreamSource(mediaStream);
+    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    let accumBuf = new Float32Array(0);
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0), resampled = downsampleTo16k(input, nativeRate);
+      let rms = 0; for (let i = 0; i < input.length; i++) rms += input[i]*input[i];
+      volFill.style.width = Math.min(Math.sqrt(rms/input.length)*500, 100) + "%";
+      const merged = new Float32Array(accumBuf.length + resampled.length);
+      merged.set(accumBuf); merged.set(resampled, accumBuf.length); accumBuf = merged;
+      while (accumBuf.length >= 1280) {
+        const chunk = accumBuf.slice(0, 1280); accumBuf = accumBuf.slice(1280);
+        if (ws && ws.readyState === WebSocket.OPEN) { lastSendTime = Date.now(); ws.send(chunk.buffer); }
+      }
+    };
+    audioSrc.connect(processor); processor.connect(audioCtx.destination);
+  }
+
+  function stopBrowserCapture() {
+    if (processor)   { processor.disconnect();   processor   = null; }
+    if (audioSrc)    { audioSrc.disconnect();     audioSrc    = null; }
+    if (audioCtx)    { audioCtx.close();          audioCtx    = null; }
+    if (mediaStream) { mediaStream.getTracks().forEach(t=>t.stop()); mediaStream = null; }
+    volFill.style.width = "0%";
+  }
+
+  function resetUI() {
+    if (selectedSrc !== "file") startBtn.style.display = "";
+    stopBtn.style.display = "none"; setStatus("idle", "Idle");
+  }
+
+  /* ── Start ── */
+  startBtn.addEventListener("click", async () => {
+    setStatus("connecting", "Connecting…");
+    startBtn.style.display = "none"; stopBtn.style.display = "";
+    try {
+      if (selectedSrc !== "youtube") {
+        setStatus("connecting", "Requesting audio…"); await startBrowserCapture();
+      } else {
+        if (!ytInput.value.trim()) throw new Error("EmptyURL");
+      }
+      openWebSocket(() => {
+        sendConfig();   // push current config right after connect
+        if (selectedSrc === "youtube") ws.send(JSON.stringify({ type: "youtube", url: ytInput.value.trim() }));
+        setStatus("recording", "● Recording");
+      });
+    } catch (err) {
+      console.error(err.name, err.message); stopBrowserCapture(); resetUI();
+      let msg;
+      if      (err.message === "EmptyURL")       msg = "Paste a YouTube URL first";
+      else if (err.message === "NoAudio")        msg = "No audio — Chrome Tab + Share audio";
+      else if (err.name   === "NotAllowedError") msg = "Permission denied";
+      else if (!navigator.mediaDevices)          msg = "Needs HTTPS";
+      else                                       msg = `${err.name}: ${err.message}`;
+      setStatus("error", msg);
+    }
+  });
+
+  /* ── Stop ── */
+  stopBtn.addEventListener("click", () => {
+    if (ws) { ws.send(JSON.stringify({ type: "stop" })); ws.close(); }
+    stopBrowserCapture(); disconnectFileCapture(); resetUI();
+  });
+
+  /* ── Clear ── */
+  clearBtn.addEventListener("click", () => {
+    clearTranscript(); setPartial("");
+    infWindow.length = 0; chunkCount = 0; lastSendTime = 0;
+    [statInference, statAvgInf, statRTT, statRTF, statTotalLag, statPreproc].forEach(el => {
+      el.textContent = "—"; el.className = "stat-val";
+    });
+    statChunks.textContent = "0"; statChunks.className = "stat-val";
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reset" }));
+  });
+</script>
+</body>
+</html>
