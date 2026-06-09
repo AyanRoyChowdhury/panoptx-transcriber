@@ -223,19 +223,22 @@ async def ws_endpoint(
 
                 audio_acc = np.concatenate([audio_acc, chunk])
 
-                # Drain all available strides so we never fall behind
+                # Feed ALL buffered audio to the streamer, then infer ONCE.
+                # Running infer() after every stride multiplies inference calls
+                # when chunks batch up, causing exponential RTT growth.
                 while len(audio_acc) >= STRIDE:
                     to_push, audio_acc = audio_acc[:STRIDE], audio_acc[STRIDE:]
                     streamer.add_audio(to_push)
-                    t0 = time.monotonic()
-                    committed, partial = await loop.run_in_executor(None, streamer.infer)
-                    inf_ms = int((time.monotonic() - t0) * 1000)
-                    await ws.send_json({
-                        "type": "stream",
-                        "committed": committed,
-                        "partial":   partial,
-                        "inference_ms": inf_ms,
-                    })
+
+                t0 = time.monotonic()
+                committed, partial = await loop.run_in_executor(None, streamer.infer)
+                inf_ms = int((time.monotonic() - t0) * 1000)
+                await ws.send_json({
+                    "type": "stream",
+                    "committed": committed,
+                    "partial":   partial,
+                    "inference_ms": inf_ms,
+                })
 
     except WebSocketDisconnect:
         pass

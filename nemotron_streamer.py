@@ -38,9 +38,9 @@ def _build_recognizer(d: Path) -> sherpa_onnx.OnlineRecognizer:
         sample_rate              = SR,
         feature_dim              = 80,
         enable_endpoint_detection= True,
-        rule1_min_trailing_silence = 2.4,
-        rule2_min_trailing_silence = 1.2,
-        rule3_min_utterance_length = 300.0,
+        rule1_min_trailing_silence = 1.2,
+        rule2_min_trailing_silence = 0.6,
+        rule3_min_utterance_length = 12.0,
         decoding_method          = "greedy_search",
         provider                 = "cpu",
     )
@@ -72,8 +72,11 @@ class NemotronStreamer:
         if self._recognizer.is_endpoint(self._stream):
             if current:
                 self._committed_tx += current + " "
-                self._recognizer.reset(self._stream)
+                # Fresh stream guarantees clean decoder state for next utterance
+                self._stream = self._recognizer.create_stream()
                 return current + " ", ""
+            # Empty endpoint (silence with no speech) — reset endpoint state only,
+            # keep stream alive so the next speech chunk is picked up cleanly
             self._recognizer.reset(self._stream)
             return "", ""
 
@@ -88,6 +91,7 @@ class NemotronStreamer:
         while self._recognizer.is_ready(self._stream):
             self._recognizer.decode_stream(self._stream)
         current = self._recognizer.get_result(self._stream).strip()
+        self._stream = self._recognizer.create_stream()
         if current:
             self._committed_tx += current
             return current, ""
