@@ -163,7 +163,16 @@ async def ws_endpoint(
     yt_task   = None
 
     # Accumulate audio between inference triggers
-    audio_acc = np.empty(0, np.float32)
+    audio_acc    = np.empty(0, np.float32)
+    stride_count = 0  # strides added since last infer call
+
+    # Infer every N strides instead of every stride.
+    # Parakeet full-window inference (~120-200 ms on CPU) is slower than the
+    # 80 ms stride interval.  Running it every stride causes the server to fall
+    # behind in real-time, building an 8-second backlog by end of an 18-second
+    # file.  With INFER_EVERY=4 the effective inference interval is 320 ms,
+    # well above the per-call cost.  Nemotron (15 ms inference) is unaffected.
+    INFER_EVERY = 4
 
     # (log already emitted above)
     try:
@@ -197,7 +206,8 @@ async def ws_endpoint(
 
                 elif data.get("type") == "reset":
                     streamer.reset()
-                    audio_acc = np.empty(0, np.float32)
+                    audio_acc    = np.empty(0, np.float32)
+                    stride_count = 0
 
                 elif data.get("type") == "config":
                     d = data
@@ -223,22 +233,22 @@ async def ws_endpoint(
 
                 audio_acc = np.concatenate([audio_acc, chunk])
 
-                # Feed ALL buffered audio to the streamer, then infer ONCE.
-                # Running infer() after every stride multiplies inference calls
-                # when chunks batch up, causing exponential RTT growth.
                 while len(audio_acc) >= STRIDE:
                     to_push, audio_acc = audio_acc[:STRIDE], audio_acc[STRIDE:]
                     streamer.add_audio(to_push)
+                    stride_count += 1
 
-                t0 = time.monotonic()
-                committed, partial = await loop.run_in_executor(None, streamer.infer)
-                inf_ms = int((time.monotonic() - t0) * 1000)
-                await ws.send_json({
-                    "type": "stream",
-                    "committed": committed,
-                    "partial":   partial,
-                    "inference_ms": inf_ms,
-                })
+                if stride_count >= INFER_EVERY:
+                    stride_count = 0
+                    t0 = time.monotonic()
+                    committed, partial = await loop.run_in_executor(None, streamer.infer)
+                    inf_ms = int((time.monotonic() - t0) * 1000)
+                    await ws.send_json({
+                        "type": "stream",
+                        "committed": committed,
+                        "partial":   partial,
+                        "inference_ms": inf_ms,
+                    })
 
     except WebSocketDisconnect:
         pass
