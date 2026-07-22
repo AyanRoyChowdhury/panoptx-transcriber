@@ -311,6 +311,7 @@
         cursor:pointer;outline:none">
         <option value="parakeet">Parakeet TDT 0.6B v3</option>
         <option value="nemotron">Nemotron Streaming 0.6B (downloads ~1.3 GB)</option>
+        <option value="nemo80">NeMo FastConformer 80ms — lowest latency (downloads ~490 MB)</option>
       </select>
     </p>
   </header>
@@ -691,7 +692,7 @@
     audioPlayer.src = URL.createObjectURL(file);
     fileNameLabel.textContent = file.name;
     filePlayerWrap.classList.add("visible");
-    dropZone.style.display = "none";
+    // Keep the drop zone visible so another file can be loaded later.
   }
 
   audioPlayer.addEventListener("play",  () => {
@@ -872,6 +873,7 @@
 
   /* ── WebSocket ── */
   let ackFadeTimer = null;
+  let closeAfterFlush = false;
   function openWebSocket(onOpenCb) {
     ws = new WebSocket(wsUrl());
     ws.binaryType = "arraybuffer";
@@ -883,6 +885,7 @@
           if (msg.committed) appendCommitted(msg.committed);
           setPartial(msg.partial || "");
           if (msg.inference_ms != null) updateStats(msg);
+          if (closeAfterFlush) { closeAfterFlush = false; ws.close(); }
         }
         if (msg.type === "append") { appendTranscript(msg.text); if (msg.inference_ms != null) updateStats(msg); }
         if (msg.type === "error")  setStatus("error", msg.message.slice(0, 60));
@@ -973,8 +976,18 @@
   });
 
   /* ── Stop ── */
+  // Don't close the socket immediately after sending "stop" — wait for the
+  // server's final flush (the last committed words) before closing, with a
+  // timeout fallback in case no response arrives.
   stopBtn.addEventListener("click", () => {
-    if (ws) { ws.send(JSON.stringify({ type: "stop" })); ws.close(); }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      closeAfterFlush = true;
+      ws.send(JSON.stringify({ type: "stop" }));
+      const sock = ws;
+      setTimeout(() => { if (closeAfterFlush) { closeAfterFlush = false; sock.close(); } }, 3000);
+    } else if (ws) {
+      ws.close();
+    }
     stopBrowserCapture(); disconnectFileCapture(); resetUI();
   });
 

@@ -92,6 +92,10 @@ def _toks_to_text(vocab: dict[int, str], token_ids: list[int]) -> str:
 class ParakeetStreamer:
     """Stateful streaming decoder.  One instance per WebSocket connection."""
 
+    # Full-window encoder pass takes ~120-200 ms on CPU — slower than the 80 ms
+    # stride — so the server batches 4 strides (320 ms) per inference call.
+    infer_every = 4
+
     # ── construction ──────────────────────────────────────────────────────────
 
     def __init__(self):
@@ -169,11 +173,10 @@ class ParakeetStreamer:
             return "", ""
         feats, feat_len = self._extract_features(self._win)
         enc_out         = self._run_encoder(feats, feat_len)
-        tokens, _       = self._greedy_decode(enc_out)
+        tokens, frames  = self._greedy_decode(enc_out)
 
-        full_text = _toks_to_text(self._vocab, tokens)
-        delta = full_text[len(self._committed_txt):]
-        self._committed_txt       = full_text
+        delta = self._delta_from_new_tokens(tokens, frames, len(tokens))
+        self._committed_txt      += delta
         self._committed_enc_frame = enc_out.shape[0] - 1
         return delta, ""
 
@@ -277,6 +280,36 @@ class ParakeetStreamer:
 
     # ── commitment logic ──────────────────────────────────────────────────────
 
+    def _delta_from_new_tokens(
+        self, tokens: list[int], frames: list[int], upto: int
+    ) -> str:
+        """
+        Text of tokens[:upto] whose encoder frame is past the committed
+        watermark.  Computed from the tokens themselves (not by slicing the
+        full window text by length) so it stays correct after the rolling
+        buffer trims and the window no longer starts at the committed text.
+        """
+        wm  = self._committed_enc_frame
+        new = [(t, f) for t, f in zip(tokens[:upto], frames[:upto]) if f > wm]
+        raw = "".join(self._vocab.get(t, "") for t, _ in new)
+
+        # Token frames jitter by ±1-2 between decode passes, so tokens that
+        # were committed in a prior pass can reappear just past the watermark
+        # and duplicate the tail of the committed text ("quickick", "dog dog").
+        # Strip the longest delta prefix that (a) comes from tokens within
+        # JITTER frames of the watermark and (b) duplicates the committed tail.
+        JITTER = 2
+        jitter_len = len("".join(self._vocab.get(t, "")
+                                 for t, f in new if f <= wm + JITTER))
+        for k in range(min(jitter_len, len(raw)), 0, -1):
+            if self._committed_txt.endswith(raw[:k]):
+                raw = raw[k:]
+                break
+
+        if not self._committed_txt:
+            raw = raw.lstrip()
+        return raw
+
     def _update_commitment(
         self,
         curr_tokens: list[int],
@@ -317,12 +350,8 @@ class ParakeetStreamer:
                 last_safe_frame = curr_frames[i]
 
         if safe_end > 0:
-            full_committed = _toks_to_text(self._vocab, curr_tokens[:safe_end])
-            if len(full_committed) > len(self._committed_txt):
-                delta = full_committed[len(self._committed_txt):]
-                self._committed_txt = full_committed
-            else:
-                delta = ""
+            delta = self._delta_from_new_tokens(curr_tokens, curr_frames, safe_end)
+            self._committed_txt      += delta
             self._committed_enc_frame = last_safe_frame
         else:
             delta = ""

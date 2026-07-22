@@ -6,3 +6,6 @@ __pycache__/
 .env
 venv/
 env/
+*.bak
+cert.pem
+key.pem

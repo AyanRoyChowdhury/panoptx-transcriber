@@ -25,6 +25,9 @@ def _make_streamer(model_id: str):
     if model_id == "nemotron":
         from nemotron_streamer import NemotronStreamer
         return NemotronStreamer()
+    if model_id == "nemo80":
+        from nemotron_streamer import Nemo80Streamer
+        return Nemo80Streamer()
     return ParakeetStreamer()   # default: parakeet-tdt
 
 
@@ -44,10 +47,15 @@ app = FastAPI(lifespan=lifespan)
 
 # ── Noise reduction (optional, per-connection) ────────────────────────────────
 
-def _bandpass(audio: np.ndarray, lo: int, hi: int) -> np.ndarray:
-    from scipy.signal import butter, sosfilt
-    sos = butter(4, [lo, hi], btype="band", fs=SR, output="sos")
-    return sosfilt(sos, audio).astype(np.float32)
+def _bandpass(audio: np.ndarray, lo: int, hi: int, state: dict) -> np.ndarray:
+    """Stateful bandpass: carries filter state (zi) across chunks so 80 ms
+    chunk boundaries don't produce filter transients (clicks)."""
+    from scipy.signal import butter, sosfilt, sosfilt_zi
+    if state.get("key") != (lo, hi):
+        sos = butter(4, [lo, hi], btype="band", fs=SR, output="sos")
+        state.update(key=(lo, hi), sos=sos, zi=sosfilt_zi(sos) * 0.0)
+    out, state["zi"] = sosfilt(state["sos"], audio, zi=state["zi"])
+    return out.astype(np.float32)
 
 
 def _noise_reduce(audio: np.ndarray, strength: float) -> np.ndarray:
@@ -58,7 +66,7 @@ def _noise_reduce(audio: np.ndarray, strength: float) -> np.ndarray:
 
 def _preprocess(audio, cfg):
     if cfg["bp_enabled"]:
-        audio = _bandpass(audio, cfg["bp_lo"], cfg["bp_hi"])
+        audio = _bandpass(audio, cfg["bp_lo"], cfg["bp_hi"], cfg["_bp_state"])
     if cfg["nr_enabled"]:
         audio = _noise_reduce(audio, cfg["nr_strength"])
     return audio
@@ -74,6 +82,7 @@ def _default_cfg():
         "bp_lo":         100,
         "bp_hi":         3800,
         "commit_margin": 1.2,   # seconds of right-context before committing
+        "_bp_state":     {},    # bandpass filter state (zi) carried across chunks
     }
 
 
@@ -102,20 +111,32 @@ async def _transcribe_youtube(url: str, ws: WebSocket, streamer: ParakeetStreame
 
     acc = np.empty(0, np.float32)
     READ_BYTES = STRIDE * 4   # read in stride-sized chunks (float32 = 4 bytes)
+    leftover   = b""          # pipe reads aren't guaranteed multiples of 4 bytes
+    stride_count = 0
+    INFER_EVERY  = getattr(streamer, "infer_every", 4)   # per-model cadence
 
     try:
         while True:
-            raw = await ffmpeg.stdout.read(READ_BYTES)
-            if not raw:
+            data = await ffmpeg.stdout.read(READ_BYTES)
+            if not data:
                 break
-            chunk = np.frombuffer(raw, np.float32).copy()
+            raw = leftover + data
+            cut = len(raw) - (len(raw) % 4)
+            leftover = raw[cut:]
+            if cut == 0:
+                continue
+            chunk = np.frombuffer(raw[:cut], np.float32).copy()
             if cfg["bp_enabled"] or cfg["nr_enabled"]:
                 chunk = await loop.run_in_executor(None, _preprocess, chunk, cfg)
             acc = np.concatenate([acc, chunk])
 
-            if len(acc) >= STRIDE:
+            while len(acc) >= STRIDE:
                 to_push, acc = acc[:STRIDE], acc[STRIDE:]
                 streamer.add_audio(to_push)
+                stride_count += 1
+
+            if stride_count >= INFER_EVERY:
+                stride_count = 0
                 t0 = time.monotonic()
                 committed, partial = await loop.run_in_executor(None, streamer.infer)
                 inf_ms = int((time.monotonic() - t0) * 1000)
@@ -155,7 +176,7 @@ async def ws_endpoint(
 ):
     await ws.accept()
 
-    model_id  = model if model in ("parakeet", "nemotron") else "parakeet"
+    model_id  = model if model in ("parakeet", "nemotron", "nemo80") else "parakeet"
     log.info("Client connected  model=%s", model_id)
     streamer  = _make_streamer(model_id)
     cfg       = _default_cfg()
@@ -168,11 +189,11 @@ async def ws_endpoint(
 
     # Infer every N strides instead of every stride.
     # Parakeet full-window inference (~120-200 ms on CPU) is slower than the
-    # 80 ms stride interval.  Running it every stride causes the server to fall
-    # behind in real-time, building an 8-second backlog by end of an 18-second
-    # file.  With INFER_EVERY=4 the effective inference interval is 320 ms,
-    # well above the per-call cost.  Nemotron (15 ms inference) is unaffected.
-    INFER_EVERY = 4
+    # 80 ms stride interval, so it needs batching (N=4 → 320 ms cadence) or the
+    # server falls behind real-time.  The sherpa streaming models decode a
+    # 320 ms batch in ~30 ms, so they infer every stride (N=1 → 80 ms cadence,
+    # ~110 ms word-to-screen latency).
+    INFER_EVERY = getattr(streamer, "infer_every", 4)
 
     # (log already emitted above)
     try:
@@ -197,6 +218,12 @@ async def ws_endpoint(
                     if yt_task and not yt_task.done():
                         yt_task.cancel()
                         yt_task = None
+                    # Push any sub-stride remainder before flushing so the
+                    # last few words aren't dropped.
+                    if len(audio_acc) > 0:
+                        streamer.add_audio(audio_acc)
+                    audio_acc    = np.empty(0, np.float32)
+                    stride_count = 0
                     # Flush any buffered audio, always send to clear partial
                     committed, _ = await loop.run_in_executor(None, streamer.flush)
                     await ws.send_json({
@@ -221,15 +248,18 @@ async def ws_endpoint(
                         streamer.set_commit_margin(cfg["commit_margin"])
                     await ws.send_json({
                         "type": "config_ack",
-                        **{k: cfg[k] for k in cfg},
+                        **{k: cfg[k] for k in cfg if not k.startswith("_")},
                     })
 
             # ── audio (mic / screen / file) ───────────────────────────────────
             elif msg.get("bytes"):
                 chunk = np.frombuffer(msg["bytes"], np.float32).copy()
 
+                preproc_ms = 0
                 if cfg["bp_enabled"] or cfg["nr_enabled"]:
+                    t0 = time.monotonic()
                     chunk = await loop.run_in_executor(None, _preprocess, chunk, cfg)
+                    preproc_ms = int((time.monotonic() - t0) * 1000)
 
                 audio_acc = np.concatenate([audio_acc, chunk])
 
@@ -248,6 +278,7 @@ async def ws_endpoint(
                         "committed": committed,
                         "partial":   partial,
                         "inference_ms": inf_ms,
+                        "preproc_ms":   preproc_ms,
                     })
 
     except WebSocketDisconnect:
