@@ -20,10 +20,11 @@ STRIDE_S = 0.08
 STRIDE   = int(STRIDE_S * SR)   # 1280 samples per push
 
 
-def _model_dir(repo: str = HF_REPO) -> Path:
+def _model_dir(repo: str = HF_REPO, allow_patterns=None) -> Path:
     local = snapshot_download(
         repo,
         cache_dir=str(Path.home() / ".cache/huggingface/hub"),
+        allow_patterns=allow_patterns,
     )
     return Path(local)
 
@@ -163,3 +164,27 @@ class Nemo80Streamer(NemotronStreamer):
 
     def set_commit_margin(self, seconds: float) -> None:
         pass   # endpoint-based; not applicable
+
+
+class ZipformerStreamer(NemotronStreamer):
+    """
+    k2/icefall streaming Zipformer (int8, chunk-16 / left-64) — ~68 MB total.
+    The smallest usable streaming transducer; runs in real time on a
+    Raspberry Pi 4/5 (sherpa-onnx ships aarch64 wheels).  Lowercase, no
+    punctuation, English only.
+    """
+    def __init__(self):
+        d = _model_dir(
+            "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+            allow_patterns=["*chunk-16-left-64.int8.onnx", "tokens.txt"],
+        )
+        self._recognizer = _build_recognizer(
+            d,
+            encoder="encoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
+            decoder="decoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
+            joiner="joiner-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
+        )
+        self._stream          = self._recognizer.create_stream()
+        self._committed_len   = 0
+        self._stall_calls     = 0
+        self._prev_result_len = 0

@@ -312,6 +312,7 @@
         <option value="parakeet">Parakeet TDT 0.6B v3</option>
         <option value="nemotron">Nemotron Streaming 0.6B (downloads ~1.3 GB)</option>
         <option value="nemo80">NeMo FastConformer 80ms — lowest latency (downloads ~490 MB)</option>
+        <option value="zipformer">Zipformer INT8 — Raspberry-Pi class (downloads ~68 MB)</option>
       </select>
     </p>
   </header>
@@ -503,10 +504,9 @@
   let audioSrc    = null;
   let selectedSrc = "mic";
 
-  let fileAudioCtx  = null;
-  let fileProcessor = null;
-  let fileAudioSrc  = null;
-  let fileConnected = false;
+  let filePcm16k    = null;   // whole file, decoded to 16 kHz mono
+  let fileSendPos   = 0;      // samples already sent to the server
+  let fileSendTimer = null;   // 50 ms pacing interval
 
   const infWindow  = [];
   let   chunkCount = 0;
@@ -680,19 +680,70 @@
   fileInput.addEventListener("change", () => { if (fileInput.files[0]) loadAudioFile(fileInput.files[0]); });
 
   function loadAudioFile(file) {
-    // Tear down any previous Web Audio context so createMediaElementSource
-    // can be called fresh on the new src (it can only be called once per element per context).
-    if (fileAudioCtx) {
-      try { fileProcessor && fileProcessor.disconnect(); } catch(_) {}
-      try { fileAudioSrc  && fileAudioSrc.disconnect();  } catch(_) {}
-      fileAudioCtx.close();
-    }
-    fileAudioCtx = null; fileAudioSrc = null; fileProcessor = null; fileConnected = false;
-
+    stopFileSender();
     audioPlayer.src = URL.createObjectURL(file);
     fileNameLabel.textContent = file.name;
     filePlayerWrap.classList.add("visible");
     // Keep the drop zone visible so another file can be loaded later.
+
+    // Decode the ENTIRE file to 16 kHz mono up front.  Transcription reads
+    // from this buffer, paced by playback position — capture jank can delay
+    // a send but can never LOSE audio (the old ScriptProcessor tap dropped
+    // buffers whenever the main thread was busy, e.g. on commit re-renders,
+    // and that audio was gone forever).
+    filePcm16k = null; fileSendPos = 0;
+    setStatus("connecting", "Decoding audio…");
+    file.arrayBuffer()
+      .then(buf => new OfflineAudioContext(1, 1, 16000).decodeAudioData(buf))
+      .then(decoded => {
+        // Mix down to mono (decodeAudioData resamples to 16 kHz for us)
+        const n = decoded.length, ch = decoded.numberOfChannels;
+        const mono = new Float32Array(n);
+        for (let c = 0; c < ch; c++) {
+          const d = decoded.getChannelData(c);
+          for (let i = 0; i < n; i++) mono[i] += d[i] / ch;
+        }
+        filePcm16k = mono;
+        setStatus("idle", `Ready — ${(n / 16000).toFixed(1)}s decoded`);
+      })
+      .catch(err => setStatus("error", "Decode failed: " + err.message));
+  }
+
+  // Paced sender: every 50 ms, send all 80 ms chunks the playhead has passed.
+  function startFileSender() {
+    stopFileSender();
+    fileSendTimer = setInterval(() => {
+      if (!filePcm16k || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const target = Math.min(filePcm16k.length,
+                              Math.floor(audioPlayer.currentTime * 16000));
+      let sentAny = false;
+      while (fileSendPos + 1280 <= target) {
+        const chunk = filePcm16k.subarray(fileSendPos, fileSendPos + 1280);
+        lastSendTime = Date.now();
+        ws.send(chunk);
+        fileSendPos += 1280;
+        sentAny = true;
+      }
+      if (sentAny) {
+        const tail = filePcm16k.subarray(Math.max(0, fileSendPos - 1280), fileSendPos);
+        let rms = 0;
+        for (let i = 0; i < tail.length; i++) rms += tail[i] * tail[i];
+        volFill.style.width = Math.min(Math.sqrt(rms / Math.max(tail.length, 1)) * 500, 100) + "%";
+      }
+    }, 50);
+  }
+  function stopFileSender() {
+    if (fileSendTimer) { clearInterval(fileSendTimer); fileSendTimer = null; }
+    volFill.style.width = "0%";
+  }
+  // Drain everything up to the end of the buffer (used on 'ended').
+  function drainFileRemainder() {
+    if (!filePcm16k || !ws || ws.readyState !== WebSocket.OPEN) return;
+    while (fileSendPos < filePcm16k.length) {
+      const end = Math.min(fileSendPos + 1280, filePcm16k.length);
+      ws.send(filePcm16k.subarray(fileSendPos, end));
+      fileSendPos = end;
+    }
   }
 
   audioPlayer.addEventListener("play",  () => {
@@ -704,75 +755,41 @@
         el.textContent = "—"; el.className = "stat-val";
       });
       statChunks.textContent = "0"; statChunks.className = "stat-val";
+      fileSendPos = 0;
       // Tell server to reset streamer state for a clean replay
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reset" }));
     }
-    connectFileCapture();
+    startFileSender();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       openWebSocket(() => { sendConfig(); setStatus("recording", "● Playing"); });
     } else {
       setStatus("recording", "● Playing");
     }
   });
-  audioPlayer.addEventListener("pause", () => setStatus("idle", "Paused"));
+  audioPlayer.addEventListener("pause", () => {
+    if (!audioPlayer.ended) setStatus("idle", "Paused");
+  });
+  audioPlayer.addEventListener("seeked", () => {
+    // Jump the send pointer to the new playhead; backwards seek restarts the
+    // server-side stream so the decoder state matches what it will now hear.
+    if (!filePcm16k) return;
+    const target = Math.floor(audioPlayer.currentTime * 16000);
+    if (target < fileSendPos && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "reset" }));
+    }
+    fileSendPos = Math.min(target - (target % 1280), filePcm16k.length);
+    if (fileSendPos < 0) fileSendPos = 0;
+  });
   audioPlayer.addEventListener("ended", () => {
     setStatus("idle", "File done");
-    disconnectFileCapture();
+    stopFileSender();
+    drainFileRemainder();   // everything the 50 ms timer hadn't sent yet
     // Flush remaining buffered audio and clear partial
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "stop" }));
     }
     setTimeout(() => setPartial(""), 2000);
   });
-
-  function connectFileCapture() {
-    if (fileConnected) return;
-    if (!fileAudioCtx) fileAudioCtx = new AudioContext();
-    if (fileAudioCtx.state === "suspended") fileAudioCtx.resume();
-    const nativeRate = fileAudioCtx.sampleRate;
-
-    // createMediaElementSource may only be called once per element per AudioContext.
-    // On replay we reuse the existing source node; only the processor is recreated.
-    if (!fileAudioSrc) {
-      fileAudioSrc = fileAudioCtx.createMediaElementSource(audioPlayer);
-      // Keep this connection permanent so playback is audible.
-      fileAudioSrc.connect(fileAudioCtx.destination);
-    }
-
-    fileProcessor = fileAudioCtx.createScriptProcessor(4096, 1, 1);
-    let accumBuf = new Float32Array(0);
-    fileProcessor.onaudioprocess = (e) => {
-      if (audioPlayer.paused) return;
-      const input     = e.inputBuffer.getChannelData(0);
-      const resampled = downsampleTo16k(input, nativeRate);
-      let rms = 0;
-      for (let i = 0; i < input.length; i++) rms += input[i] * input[i];
-      volFill.style.width = Math.min(Math.sqrt(rms / input.length) * 500, 100) + "%";
-      const merged = new Float32Array(accumBuf.length + resampled.length);
-      merged.set(accumBuf); merged.set(resampled, accumBuf.length);
-      accumBuf = merged;
-      while (accumBuf.length >= 1280) {
-        const chunk = accumBuf.slice(0, 1280);
-        accumBuf = accumBuf.slice(1280);
-        if (ws && ws.readyState === WebSocket.OPEN) { lastSendTime = Date.now(); ws.send(chunk.buffer); }
-      }
-    };
-    fileAudioSrc.connect(fileProcessor);
-    fileProcessor.connect(fileAudioCtx.destination);
-    fileConnected = true;
-  }
-
-  function disconnectFileCapture() {
-    if (!fileConnected) return;
-    if (fileProcessor) {
-      // Disconnect only the processor; leave fileAudioSrc → destination so audio stays audible.
-      try { fileAudioSrc.disconnect(fileProcessor); } catch(_) {}
-      fileProcessor.disconnect();
-      fileProcessor = null;
-    }
-    fileConnected = false;
-    volFill.style.width = "0%";
-  }
 
   /* ── Status ── */
   function setStatus(cls, label) { statusBadge.className = `status ${cls}`; statusBadge.textContent = label; }
@@ -918,11 +935,11 @@
     }
     audioCtx = new AudioContext(); await audioCtx.resume();
     const nativeRate = audioCtx.sampleRate;
-    audioSrc  = audioCtx.createMediaStreamSource(mediaStream);
-    processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    audioSrc = audioCtx.createMediaStreamSource(mediaStream);
+
     let accumBuf = new Float32Array(0);
-    processor.onaudioprocess = (e) => {
-      const input = e.inputBuffer.getChannelData(0), resampled = downsampleTo16k(input, nativeRate);
+    const handleSamples = (input) => {
+      const resampled = downsampleTo16k(input, nativeRate);
       let rms = 0; for (let i = 0; i < input.length; i++) rms += input[i]*input[i];
       volFill.style.width = Math.min(Math.sqrt(rms/input.length)*500, 100) + "%";
       const merged = new Float32Array(accumBuf.length + resampled.length);
@@ -932,7 +949,43 @@
         if (ws && ws.readyState === WebSocket.OPEN) { lastSendTime = Date.now(); ws.send(chunk.buffer); }
       }
     };
-    audioSrc.connect(processor); processor.connect(audioCtx.destination);
+
+    if (audioCtx.audioWorklet) {
+      // AudioWorklet runs on the audio rendering thread — unlike the old
+      // ScriptProcessorNode it never drops buffers when the main thread is
+      // busy (e.g. during transcript re-renders); messages queue instead.
+      const workletSrc = `
+        class CaptureProcessor extends AudioWorkletProcessor {
+          constructor() { super(); this._bufs = []; this._len = 0; }
+          process(inputs) {
+            const ch = inputs[0] && inputs[0][0];
+            if (ch) {
+              this._bufs.push(ch.slice(0)); this._len += ch.length;
+              if (this._len >= 2048) {
+                const out = new Float32Array(this._len); let o = 0;
+                for (const b of this._bufs) { out.set(b, o); o += b.length; }
+                this.port.postMessage(out, [out.buffer]);
+                this._bufs = []; this._len = 0;
+              }
+            }
+            return true;
+          }
+        }
+        registerProcessor("capture-processor", CaptureProcessor);`;
+      const url = URL.createObjectURL(new Blob([workletSrc], { type: "application/javascript" }));
+      await audioCtx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      processor = new AudioWorkletNode(audioCtx, "capture-processor", {
+        numberOfInputs: 1, numberOfOutputs: 0,
+      });
+      processor.port.onmessage = (e) => handleSamples(e.data);
+      audioSrc.connect(processor);
+    } else {
+      // Fallback for ancient browsers
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processor.onaudioprocess = (e) => handleSamples(e.inputBuffer.getChannelData(0));
+      audioSrc.connect(processor); processor.connect(audioCtx.destination);
+    }
   }
 
   function stopBrowserCapture() {
@@ -988,7 +1041,7 @@
     } else if (ws) {
       ws.close();
     }
-    stopBrowserCapture(); disconnectFileCapture(); resetUI();
+    stopBrowserCapture(); stopFileSender(); resetUI();
   });
 
   /* ── Clear ── */

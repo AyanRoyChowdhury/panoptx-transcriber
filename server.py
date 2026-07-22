@@ -28,6 +28,9 @@ def _make_streamer(model_id: str):
     if model_id == "nemo80":
         from nemotron_streamer import Nemo80Streamer
         return Nemo80Streamer()
+    if model_id == "zipformer":
+        from nemotron_streamer import ZipformerStreamer
+        return ZipformerStreamer()
     return ParakeetStreamer()   # default: parakeet-tdt
 
 
@@ -176,7 +179,7 @@ async def ws_endpoint(
 ):
     await ws.accept()
 
-    model_id  = model if model in ("parakeet", "nemotron", "nemo80") else "parakeet"
+    model_id  = model if model in ("parakeet", "nemotron", "nemo80", "zipformer") else "parakeet"
     log.info("Client connected  model=%s", model_id)
     streamer  = _make_streamer(model_id)
     cfg       = _default_cfg()

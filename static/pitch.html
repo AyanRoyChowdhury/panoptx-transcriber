@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PanOptX Live Transcription — Real-Time Captions for Broadcast</title>
+<style>
+  :root {
+    --teal: #00d4c8; --teal-dim: #00a89f; --coral: #ff6b5b;
+    --bg: #061a1e; --text: #e8f8f8; --dim: rgba(232,248,248,0.55);
+    --faint: rgba(232,248,248,0.3); --border: rgba(0,212,200,0.22);
+    --glass: rgba(0,212,200,0.06); --green: #00e5b0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse 70% 50% at 15% 10%, rgba(0,212,200,0.13) 0%, transparent 60%),
+      radial-gradient(ellipse 55% 45% at 90% 90%, rgba(255,107,91,0.10) 0%, transparent 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 880px; margin: 0 auto; padding: 3rem 2rem 4rem;
+  }
+  h1 {
+    font-size: 2.6rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15;
+    background: linear-gradient(135deg, var(--teal) 0%, #80f5f0 45%, var(--coral) 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .tagline { color: var(--dim); font-size: 1.15rem; margin-top: 0.8rem; line-height: 1.6; }
+  .tagline strong { color: var(--teal); }
+  .section { margin-top: 2.6rem; }
+  .label {
+    font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.16em; color: var(--teal-dim); margin-bottom: 1rem;
+  }
+  .hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 2.2rem; }
+  .stat {
+    background: var(--glass); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.3rem 1.4rem; text-align: center;
+  }
+  .stat .num {
+    font-size: 2.1rem; font-weight: 800; font-variant-numeric: tabular-nums;
+    background: linear-gradient(135deg, var(--green), #00ffcc);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .stat .cap { font-size: 0.78rem; color: var(--dim); margin-top: 0.4rem; line-height: 1.4; }
+  ul.points { list-style: none; }
+  ul.points li {
+    padding: 0.55rem 0 0.55rem 1.8rem; position: relative;
+    color: var(--dim); font-size: 0.98rem; line-height: 1.65;
+  }
+  ul.points li::before { content: "▸"; position: absolute; left: 0.3rem; color: var(--teal); }
+  ul.points li strong { color: var(--text); }
+  .flow {
+    display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+    background: var(--glass); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.4rem 1.6rem; font-size: 0.92rem;
+  }
+  .flow .step {
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.5rem 0.9rem; color: var(--text); white-space: nowrap;
+  }
+  .flow .arrow { color: var(--coral); font-weight: 800; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--teal-dim); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; }
+  td { color: var(--dim); } td:first-child { color: var(--text); font-weight: 600; }
+  .highlight-row td { color: var(--text); background: rgba(0,229,176,0.05); }
+  .footer {
+    margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+    color: var(--faint); font-size: 0.8rem; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+  }
+  @media print { body { background: #fff; color: #111; } }
+</style>
+</head>
+<body>
+
+<h1>Live Captions for Sports Broadcast.<br>Word by Word. In Real Time.</h1>
+<p class="tagline">
+  <strong>PanOptX Live Transcription</strong> turns your broadcast audio feed into accurate,
+  streaming text — fast enough to go on air as the commentator speaks.
+  Runs entirely <strong>on-premise, CPU-only</strong>. No cloud, no GPU, no per-minute fees.
+</p>
+
+<div class="hero-stats">
+  <div class="stat"><div class="num">~250 ms</div><div class="cap">typical word-final latency<br>(audio in → text out)</div></div>
+  <div class="stat"><div class="num">CPU-only</div><div class="cap">no GPU required —<br>runs on commodity hardware</div></div>
+  <div class="stat"><div class="num">On-prem</div><div class="cap">audio never leaves your<br>infrastructure</div></div>
+</div>
+
+<div class="section">
+  <div class="label">Why it wins for live sports</div>
+  <ul class="points">
+    <li><strong>True streaming, not chunking.</strong> A cache-aware streaming transducer emits each word the moment it's recognized — a <strong>constant per-word latency bound</strong> (~250 ms typical, &lt;450 ms worst case), not a variable 2–5 s chunk delay. TV captioning norms are 2–5 seconds; we operate an order of magnitude inside that.</li>
+    <li><strong>Built for noisy broadcast audio.</strong> Crowd noise, stadium PA, fast commentary — handled by noise-robust acoustic models plus an optional speech-band filter front-end.</li>
+    <li><strong>Words never retract.</strong> Committed text is final — safe to push straight to the broadcast graphics pipeline. A live preview of the in-progress word is available separately.</li>
+    <li><strong>Drop-in C++ integration.</strong> The engine is a native C++ library. Your application feeds 80 ms PCM chunks and receives committed words — in-process, zero network hops.</li>
+    <li><strong>Selectable accuracy/latency profiles.</strong> Lowest-latency (~200 ms), balanced (punctuated, ~300 ms), or maximum-accuracy (~1 s) — switchable per production.</li>
+  </ul>
+</div>
+
+<div class="section">
+  <div class="label">Integration — your pipeline, three steps</div>
+  <div class="flow">
+    <span class="step">🎥 Your C++ app demuxes broadcast A/V</span>
+    <span class="arrow">→</span>
+    <span class="step">🎙 80 ms PCM chunks → PanOptX engine (in-process)</span>
+    <span class="arrow">→</span>
+    <span class="step">📺 Committed words → on-air graphics</span>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Engine profiles</div>
+  <table>
+    <tr><th>Profile</th><th>Per-word latency</th><th>Output</th><th>Best for</th></tr>
+    <tr class="highlight-row"><td>Ultra-low latency</td><td>~200–250 ms</td><td>lowercase text</td><td>Live on-air captions</td></tr>
+    <tr><td>Balanced</td><td>~300–400 ms</td><td>punctuated, capitalized</td><td>Live + readable overlays</td></tr>
+    <tr><td>Max accuracy</td><td>~1 s</td><td>punctuated, capitalized</td><td>Near-live, replays, archive</td></tr>
+  </table>
+</div>
+
+<div class="section">
+  <div class="label">Deployment</div>
+  <ul class="points">
+    <li><strong>Hardware:</strong> any modern multi-core CPU (Apple Silicon / x86). Inference uses &lt;5% of real-time per stream — dozens of parallel feeds per machine.</li>
+    <li><strong>Privacy &amp; rights:</strong> fully on-premise; broadcast audio is never sent to third-party cloud services.</li>
+    <li><strong>Today:</strong> a live browser demo is running now — microphone, screen/tab audio, file, and YouTube input, with live latency metrics on screen.</li>
+  </ul>
+</div>
+
+<div class="footer">
+  <span><strong style="color:var(--teal)">PanOptX</strong> · Live Transcription</span>
+  <span>Live demo available on request</span>
+</div>
+
+</body>
+</html>
